@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dr. Smith's Clinic Assistant</title>
+  <style>
+    body { margin: 0; font-family: Segoe UI, system-ui, sans-serif; background: #f4f7f6; color: #13221f; }
+    header, form, #setup { padding: 12px 16px; }
+    header { background: #0f766e; color: white; }
+    h1 { margin: 0; font-size: 20px; }
+    p { margin: 4px 0 0; }
+    #log { max-width: 760px; margin: 0 auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-height: 50vh; }
+    .msg { max-width: 80%; padding: 10px 12px; border-radius: 12px; white-space: pre-wrap; }
+    .user { align-self: flex-end; background: #0f766e; color: white; }
+    .bot { align-self: flex-start; background: white; border: 1px solid #d5e3e0; }
+    form { display: flex; gap: 8px; position: sticky; bottom: 0; background: #f4f7f6; }
+    input, textarea, button { font: inherit; border-radius: 8px; padding: 10px; }
+    textarea { flex: 1; }
+    button { background: #0f766e; color: white; border: 0; }
+    #setup { display: grid; gap: 8px; max-width: 760px; margin: 0 auto; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Dr. Smith's Clinic Assistant</h1>
+    <p>Monday to Saturday, 9 AM to 5 PM. This chat cannot give a medical diagnosis.</p>
+  </header>
+  <section id="setup">
+    <label>Gemini API key (saved only in this browser)</label>
+    <input id="key" type="password" placeholder="Paste key" />
+    <button id="start" type="button">Start</button>
+  </section>
+  <div id="log" class="hidden"></div>
+  <form id="composer" class="hidden">
+    <textarea id="prompt" rows="2" placeholder="Ask about timings, appointments, or location"></textarea>
+    <button type="submit">Send</button>
+  </form>
+  <script>
+    const SYSTEM = "You are a helpful and polite clinic receptionist chatbot for Dr. Smith's general practice. Clinic timings are Monday to Saturday, 9 AM to 5 PM. Help with booking appointments and basic location questions. You cannot provide official medical diagnoses; tell the user to consult the doctor in person.";
+    const history = [];
+    const setup = document.getElementById("setup");
+    const log = document.getElementById("log");
+    const composer = document.getElementById("composer");
+    function add(role, text) {
+      const div = document.createElement("div");
+      div.className = "msg " + role;
+      div.textContent = text;
+      log.appendChild(div);
+    }
+    function openChat() {
+      setup.classList.add("hidden");
+      log.classList.remove("hidden");
+      composer.classList.remove("hidden");
+      add("bot", "Welcome to Dr. Smith's general practice. How can I help you today?");
+    }
+    if (localStorage.getItem("clinic_gemini_key")) openChat();
+    document.getElementById("start").onclick = () => {
+      const key = document.getElementById("key").value.trim();
+      if (!key) return;
+      localStorage.setItem("clinic_gemini_key", key);
+      openChat();
+    };
+    composer.onsubmit = async (e) => {
+      e.preventDefault();
+      const text = document.getElementById("prompt").value.trim();
+      const key = localStorage.getItem("clinic_gemini_key");
+      if (!text || !key) return;
+      document.getElementById("prompt").value = "";
+      add("user", text);
+      history.push({ role: "user", parts: [{ text }] });
+      add("bot", "Please wait...");
+      const pending = log.lastChild;
+      try {
+        const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=" + encodeURIComponent(key), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SYSTEM }] },
+            contents: history.slice(-12)
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || res.statusText);
+        const reply = data.candidates?.[0]?.content?.parts?.map(p => p.text).join("") || "No reply.";
+        pending.textContent = reply;
+        pending.className = "msg bot";
+        history.push({ role: "model", parts: [{ text: reply }] });
+      } catch (err) {
+        pending.textContent = "Error: " + err.message;
+        history.pop();
+      }
+    };
+  </script>
+</body>
+</html>
